@@ -1,9 +1,9 @@
 """Command line interface for agent-blackbox.
 
     agent-blackbox verify   [--db PATH]
-    agent-blackbox tail     [--db PATH] [-n N]
+    agent-blackbox tail     [--db PATH] [-n N] [--actor A] [--action B] [--since TS] [--until TS]
     agent-blackbox stats    [--db PATH]
-    agent-blackbox export   [--db PATH] [--format jsonl|csv]
+    agent-blackbox export   [--db PATH] [--format jsonl|csv] [--actor A] [--action B] [--since TS] [--until TS]
     agent-blackbox record   [--db PATH] --actor A --action B [--target T] [--payload P]
 
 The key (for HMAC chaining) is read from AGENT_BLACKBOX_KEY when set.
@@ -23,6 +23,17 @@ def _add_db(p: argparse.ArgumentParser) -> None:
     p.add_argument("--db", default="agent_blackbox.db", help="path to the ledger file")
 
 
+def _add_entry_filters(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--actor", default=None, help="only include entries from this actor")
+    p.add_argument("--action", default=None, help="only include entries with this action")
+    p.add_argument("--since", default=None, help="only include entries at or after this timestamp")
+    p.add_argument("--until", default=None, help="only include entries at or before this timestamp")
+
+
+def _filtered_entries(led: Ledger, args: argparse.Namespace):
+    return led.entries(actor=args.actor, action=args.action, since=args.since, until=args.until)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agent-blackbox", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -33,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
     p_tail = sub.add_parser("tail", help="show the most recent entries")
     _add_db(p_tail)
     p_tail.add_argument("-n", type=int, default=10, help="how many entries")
+    _add_entry_filters(p_tail)
 
     p_stats = sub.add_parser("stats", help="summary counts")
     _add_db(p_stats)
@@ -40,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     p_export = sub.add_parser("export", help="dump the whole ledger")
     _add_db(p_export)
     p_export.add_argument("--format", choices=("jsonl", "csv"), default="jsonl")
+    _add_entry_filters(p_export)
 
     p_rec = sub.add_parser("record", help="append one entry (handy for shell hooks)")
     _add_db(p_rec)
@@ -60,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.cmd == "tail":
-        rows = list(led.entries())[-args.n :]
+        rows = list(_filtered_entries(led, args))[-args.n :]
         for e in rows:
             print(f"[{e.seq}] {e.ts} {e.actor} {e.action} {e.target or ''}".rstrip())
         return 0
@@ -80,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "export":
-        rows = led.entries()
+        rows = _filtered_entries(led, args)
         if args.format == "jsonl":
             for e in rows:
                 print(json.dumps(e.as_dict(), ensure_ascii=False))
